@@ -60,7 +60,6 @@ PROTOCOL_LABELS = {
     "vless-ws": "VLESS + WebSocket",
     "xhttp-packet-up": "XHTTP (packet-up)",
     "xhttp-stream-up": "XHTTP (stream-up)",
-    "xhttp-stream-one": "XHTTP (stream-one)",
 }
 
 def _protocol_label(p: str) -> str:
@@ -148,6 +147,7 @@ def _main_menu_kb():
     return {"inline_keyboard": [
         [{"text": "📋 لیست کانفیگ‌ها", "callback_data": "list:0"}],
         [{"text": "➕ ساخت کانفیگ جدید", "callback_data": "newcfg"}],
+        [{"text": "⚡ بهترین تنظیمات خودکار", "callback_data": "bestcfg"}],
         [{"text": "🗂 گروه‌های ساب (لینک حرفه‌ای)", "callback_data": "subs:0"}],
         [{"text": "🔄 رفرش", "callback_data": "menu"}],
     ]}
@@ -413,7 +413,7 @@ async def _handle_message(msg: dict):
 
     if text in ("/start", "/menu"):
         _pending.pop(chat_id, None)
-        await _send(chat_id, "👋 به ربات مدیریت Agex خوش اومدی.\nاز دکمه‌های زیر برای مدیریت کانفیگ‌ها استفاده کن:", _main_menu_kb())
+        await _send(chat_id, "👋 به ربات مدیریت X4G خوش اومدی.\nاز دکمه‌های زیر برای مدیریت کانفیگ‌ها استفاده کن:", _main_menu_kb())
         return
 
     if text == "/cancel":
@@ -526,7 +526,7 @@ async def _handle_callback(cb: dict):
 
     if data == "menu":
         _pending.pop(chat_id, None)
-        await _edit(chat_id, message_id, "منوی مدیریت Agex:", _main_menu_kb())
+        await _edit(chat_id, message_id, "منوی مدیریت X4G:", _main_menu_kb())
         return
 
     if data.startswith("list:"):
@@ -653,6 +653,22 @@ async def _handle_callback(cb: dict):
     if data == "newcfg":
         _pending[chat_id] = {"action": "wizard", "step": "label", "data": {}}
         await _edit(chat_id, message_id, _wizard_prompt("label", {}), _wizard_cancel_kb())
+        return
+
+    if data == "bestcfg":
+        # یک‌کلیکی: بهترین تنظیمات (مثل دکمه قرمز پنل وب)
+        uid, link = await make_link(
+            label="بهترین کانفیگ XHTTP",
+            limit_bytes=0,
+            expires_at=None,
+            protocol="xhttp-packet-up",
+            fingerprint="chrome",
+            alpn="h2,http/1.1",
+            port=443,
+            ip_limit=0,
+            speed_limit_bytes=0,
+        )
+        await _edit(chat_id, message_id, f"✅ بهترین کانفیگ ساخته شد.\n\n{_format_detail(uid, link)}", _link_detail_kb(uid, link["active"]))
         return
 
     if data == "w:cancel":
@@ -837,8 +853,27 @@ async def start_bot():
     if not ADMIN_IDS:
         logger.warning("Telegram bot: TELEGRAM_ADMIN_IDS تنظیم نشده، هیچ‌کس اجازه‌ی مدیریت نداره (ربات روشنه ولی همه رد می‌شن).")
     _client = httpx.AsyncClient(timeout=httpx.Timeout(40.0, connect=10.0))
+    # پاک کردن webhook احتمالی و تست توکن
+    try:
+        await _client.post(f"{API_BASE}/deleteWebhook", json={"drop_pending_updates": False})
+        r = await _client.get(f"{API_BASE}/getMe")
+        me = r.json()
+        if not me.get("ok"):
+            logger.error(f"Telegram bot: توکن نامعتبر است — {me}")
+            await _client.aclose()
+            _client = None
+            return
+        uname = me.get("result", {}).get("username", "?")
+        logger.info(f"Telegram bot: متصل شد به @{uname} — ادمین‌ها: {ADMIN_IDS or 'هیچ‌کس'}")
+    except Exception as e:
+        logger.error(f"Telegram bot: خطای راه‌اندازی — {e}")
+        if _client:
+            await _client.aclose()
+            _client = None
+        return
     _running = True
     _poll_task = asyncio.create_task(_poll_loop())
+    logger.info("Telegram bot: long-polling شروع شد ✓")
 
 async def stop_bot():
     global _running, _client
